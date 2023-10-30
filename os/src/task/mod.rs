@@ -14,9 +14,10 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::config::MAX_APP_NUM;
+use crate::config::{MAX_APP_NUM, MAX_SYSCALL_NUM};
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_us;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -54,6 +55,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+            start_time: 0,
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -80,6 +83,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
+        task0.start_time = get_time_us();
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -88,6 +92,20 @@ impl TaskManager {
             __switch(&mut _unused as *mut TaskContext, next_task_cx_ptr);
         }
         panic!("unreachable in run_first_task!");
+    }
+
+    /// incr_syscalls
+    fn incr_syscalls(&self, syscalls: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[syscalls] += 1;
+    }
+
+    fn get_tcb(&self) -> TaskControlBlock {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        // TODO
+        inner.tasks[current]
     }
 
     /// Change the status of current `Running` task into `Ready`.
@@ -122,6 +140,9 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            if inner.tasks[next].start_time == 0 {
+                inner.tasks[next].start_time = get_time_us();
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -146,6 +167,16 @@ pub fn run_first_task() {
 /// or there is no `Ready` task and we can exit with all applications completed
 fn run_next_task() {
     TASK_MANAGER.run_next_task();
+}
+
+/// incr_syscalls
+pub fn incr_syscalls(syscalls: usize) {
+    TASK_MANAGER.incr_syscalls(syscalls)
+}
+
+/// get_tcb
+pub fn get_tcb() -> TaskControlBlock {
+    TASK_MANAGER.get_tcb()
 }
 
 /// Change the status of current `Running` task into `Ready`.
