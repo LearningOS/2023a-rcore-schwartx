@@ -58,23 +58,23 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
         return -1;
     }
 
-    let ts_size = size_of::<TimeVal>();
+    // 获取当前时间
+    let us = get_time_us();
+    let time_val_part = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
 
     // 使用 translated_byte_buffer 函数处理跨页问题
-    let time_val_buffers = translated_byte_buffer(current_user_token(), _ts as *const u8, ts_size);
+    let time_val_buffers =
+        translated_byte_buffer(current_user_token(), _ts as *const u8, size_of::<TimeVal>());
     if time_val_buffers.is_empty() {
         return -1;
     }
 
-    // 获取当前时间
-    let us = get_time_us();
-    let sec = us / 1_000_000;
-    let usec = us % 1_000_000;
-
     // 逐部分复制数据
     let mut offset = 0;
     for buffer in time_val_buffers {
-        let time_val_part = TimeVal { sec, usec };
         unsafe {
             copy_nonoverlapping(
                 (&time_val_part as *const TimeVal as *const u8).add(offset),
