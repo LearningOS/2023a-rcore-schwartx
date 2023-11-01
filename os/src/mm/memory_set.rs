@@ -51,6 +51,22 @@ impl MemorySet {
     pub fn token(&self) -> usize {
         self.page_table.token()
     }
+    /// Check if the range from start to end can be allocated with the specified permissions
+    pub fn can_allocate_range(&self, start: VirtAddr, end: VirtAddr) -> bool {
+        // Align the start address down and the end address up to page boundaries
+        let start_vpn = start.floor();
+        let end_vpn = end.ceil();
+
+        // Iterate over each page in the range
+        for vpn in start_vpn.0..end_vpn.0 {
+            // If the page is already mapped in the page table, return false
+            if self.page_table.translate(VirtPageNum(vpn)).is_some() {
+                return false;
+            }
+        }
+        // If all pages in the range are not mapped, return true
+        true
+    }
     /// Assume that no conflicts.
     pub fn insert_framed_area(
         &mut self,

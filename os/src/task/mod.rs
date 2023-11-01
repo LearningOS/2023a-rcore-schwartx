@@ -16,6 +16,7 @@ mod task;
 
 use crate::config::MAX_SYSCALL_NUM;
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{MapPermission, VirtAddr};
 use crate::sync::UPSafeCell;
 use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
@@ -105,6 +106,19 @@ impl TaskManager {
         inner.tasks[current].start_time
     }
 
+    fn mmap(&self, start: VirtAddr, end: VirtAddr, port: MapPermission) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+
+        let task = &mut inner.tasks[current];
+
+        if !task.memory_set.can_allocate_range(start, end) {
+            return -1;
+        }
+        task.memory_set.insert_framed_area(start, end, port);
+        0
+    }
+
     fn get_syscall_times(&self) -> [u32; MAX_SYSCALL_NUM] {
         let inner = self.inner.exclusive_access();
         let current = inner.current_task;
@@ -190,6 +204,11 @@ pub fn get_syscall_times() -> [u32; MAX_SYSCALL_NUM] {
 /// get start time
 pub fn get_start_time() -> usize {
     TASK_MANAGER.get_start_time()
+}
+
+/// mmap
+pub fn mmap(start: VirtAddr, end: VirtAddr, port: MapPermission) -> isize {
+    TASK_MANAGER.mmap(start, end, port)
 }
 
 /// incr_syscalls
