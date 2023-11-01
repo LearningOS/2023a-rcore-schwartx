@@ -6,10 +6,10 @@ use crate::{
     mm::translated_byte_buffer,
     syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_TASK_INFO, SYSCALL_YIELD},
     task::{
-        change_program_brk, current_user_token, exit_current_and_run_next, incr_syscalls,
-        suspend_current_and_run_next, TaskStatus,
+        change_program_brk, current_user_token, exit_current_and_run_next, get_start_time,
+        get_syscall_times, incr_syscalls, suspend_current_and_run_next, TaskStatus,
     },
-    timer::get_time_us,
+    timer::{get_time_us, get_time_ms},
 };
 
 #[repr(C)]
@@ -28,6 +28,29 @@ pub struct TaskInfo {
     syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
     time: usize,
+}
+
+/// Copies the content of a provided reference to a potentially page-split memory location.
+pub fn copy_to_user<T: Sized>(user_ptr: *mut T, data: &T, token: usize) -> Result<(), isize> {
+    // Safety: Function is inherently unsafe as it manipulates raw pointers and relies on correct token.
+    unsafe {
+        let buffers = translated_byte_buffer(token, user_ptr as *const u8, size_of::<T>());
+        if buffers.is_empty() {
+            return Err(-1);
+        }
+
+        let mut offset = 0;
+        for buffer in buffers {
+            copy_nonoverlapping(
+                (data as *const T as *const u8).add(offset),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            );
+            offset += buffer.len();
+        }
+    }
+
+    Ok(())
 }
 
 /// task exits and submit an exit code
@@ -49,7 +72,6 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
     incr_syscalls(SYSCALL_GET_TIME);
@@ -58,34 +80,16 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
         return -1;
     }
 
-    // 获取当前时间
     let us = get_time_us();
     let time_val_part = TimeVal {
         sec: us / 1_000_000,
         usec: us % 1_000_000,
     };
 
-    // 使用 translated_byte_buffer 函数处理跨页问题
-    let time_val_buffers =
-        translated_byte_buffer(current_user_token(), _ts as *const u8, size_of::<TimeVal>());
-    if time_val_buffers.is_empty() {
-        return -1;
+    match copy_to_user(_ts, &time_val_part, current_user_token()) {
+        Ok(_) => 0,
+        Err(err) => err,
     }
-
-    // 逐部分复制数据
-    let mut offset = 0;
-    for buffer in time_val_buffers {
-        unsafe {
-            copy_nonoverlapping(
-                (&time_val_part as *const TimeVal as *const u8).add(offset),
-                buffer.as_mut_ptr(),
-                buffer.len(),
-            );
-        }
-        offset += buffer.len();
-    }
-
-    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
@@ -94,7 +98,16 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
     incr_syscalls(SYSCALL_TASK_INFO);
-    -1
+    let task_info_val = TaskInfo {
+        status: TaskStatus::Running,
+        syscall_times: get_syscall_times(),
+        time: get_time_ms() - get_start_time(),
+    };
+
+    match copy_to_user(_ti, &task_info_val, current_user_token()) {
+        Ok(_) => 0,
+        Err(err) => err,
+    }
 }
 
 // YOUR JOB: Implement mmap.
