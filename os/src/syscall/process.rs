@@ -123,12 +123,13 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
         return -1;
     }
 
+    // somethin wrong with `from_bits_truncate`
     let port = match port {
-        1 => MapPermission::U | MapPermission::R,
-        2 => MapPermission::U | MapPermission::W,
-        3 => MapPermission::U | MapPermission::R | MapPermission::W,
-        _ => MapPermission::U | MapPermission::R | MapPermission::W | MapPermission::X,
-    };
+        1 => MapPermission::R,
+        2 => MapPermission::W,
+        3 => MapPermission::R | MapPermission::W,
+        _ => MapPermission::empty(),
+    } | MapPermission::U;
 
     // 计算结束地址，向上取整至页面边界
     let end = VirtAddr::from((start + len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1));
