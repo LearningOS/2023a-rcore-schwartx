@@ -122,7 +122,7 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
         debug!("port is invalid");
         return -1;
     }
-    let port = MapPermission::from_bits_truncate(port as u8);
+    let port = MapPermission::from_bits_truncate(port as u8) | MapPermission::U;
 
     // 计算结束地址，向上取整至页面边界
     let end = VirtAddr::from((start + len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1));
@@ -143,14 +143,15 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
 
 // YOUR JOB: Implement munmap.
 pub fn sys_munmap(start: usize, len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+    trace!("kernel: sys_munmap ");
 
-    // 计算结束地址，向上取整至页面边界
-    let end = if len > 0 {
-        (start + len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
-    } else {
-        start
-    };
+    if len == 0 || start % PAGE_SIZE != 0 || len % PAGE_SIZE != 0 {
+        // 如果长度为 0，或者 start 或 len 没有按页对齐，返回错误
+        return -1;
+    }
+
+    let end = start + len;
+
     munmap(start.into(), end.into())
 }
 /// change data segment size

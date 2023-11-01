@@ -115,7 +115,8 @@ impl TaskManager {
             debug!("mmap: vaddr is mapped");
             return -1;
         }
-        task.memory_set.insert_framed_area(start, end, port);
+        task.memory_set
+            .insert_framed_area(start.floor().into(), end.ceil().into(), port);
         debug!("mmap success");
         0
     }

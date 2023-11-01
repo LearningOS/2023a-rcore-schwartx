@@ -57,19 +57,13 @@ impl MemorySet {
         let start_vpn = start.floor();
         let end_vpn = end.ceil();
 
-        // Check against reserved MapAreas
-        for area in &self.areas {
-            // If the area overlaps with the start and end addresses, return false
-            if area.vpn_range.get_start() <= end_vpn && start_vpn <= area.vpn_range.get_end() {
-                return false;
-            }
-        }
-
         // // Iterate over each page in the range
-        for vpn in start_vpn.0..end_vpn.0 {
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
             // If the page is already mapped in the page table, return false
-            if self.page_table.translate(VirtPageNum(vpn)).is_some() {
-                return false;
+            if let Some(pte) = self.page_table.translate(vpn) {
+                if pte.is_valid() {
+                    return false;
+                }
             }
         }
 
