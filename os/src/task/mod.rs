@@ -113,9 +113,11 @@ impl TaskManager {
         let task = &mut inner.tasks[current];
 
         if !task.memory_set.can_allocate_range(start, end) {
+            debug!("vaddr is mapped");
             return -1;
         }
         task.memory_set.insert_framed_area(start, end, port);
+        debug!("mmap success");
         0
     }
 
