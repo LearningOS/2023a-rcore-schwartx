@@ -7,7 +7,7 @@ use crate::{
     syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_TASK_INFO, SYSCALL_YIELD},
     task::{
         change_program_brk, current_user_token, exit_current_and_run_next, get_start_time,
-        get_syscall_times, incr_syscalls, mmap, suspend_current_and_run_next, TaskStatus,
+        get_syscall_times, incr_syscalls, mmap, munmap, suspend_current_and_run_next, TaskStatus,
     },
     timer::{get_time_ms, get_time_us},
 };
@@ -138,9 +138,16 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
 }
 
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+
+    // 计算结束地址，向上取整至页面边界
+    let end = if len > 0 {
+        (start + len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
+    } else {
+        start
+    };
+    munmap(start.into(), end.into())
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

@@ -109,15 +109,28 @@ impl TaskManager {
     fn mmap(&self, start: VirtAddr, end: VirtAddr, port: MapPermission) -> isize {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
-
         let task = &mut inner.tasks[current];
 
-        if !task.memory_set.can_allocate_range(start, end) {
-            debug!("vaddr is mapped");
+        if !task.memory_set.is_not_mapped(start, end) {
+            debug!("mmap: vaddr is mapped");
             return -1;
         }
         task.memory_set.insert_framed_area(start, end, port);
         debug!("mmap success");
+        0
+    }
+
+    fn munmap(&self, start: VirtAddr, end: VirtAddr) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let task = &mut inner.tasks[current];
+
+        if task.memory_set.is_not_mapped(start, end) {
+            debug!("munmap: vaddr is not mapped");
+            return -1;
+        }
+        task.memory_set.unmap_area(start, end);
+        debug!("munmap success");
         0
     }
 
@@ -211,6 +224,11 @@ pub fn get_start_time() -> usize {
 /// mmap
 pub fn mmap(start: VirtAddr, end: VirtAddr, port: MapPermission) -> isize {
     TASK_MANAGER.mmap(start, end, port)
+}
+
+/// munmap
+pub fn munmap(start: VirtAddr, end: VirtAddr) -> isize {
+    TASK_MANAGER.munmap(start, end)
 }
 
 /// incr_syscalls
