@@ -116,7 +116,7 @@ impl TaskManager {
             return -1;
         }
         task.memory_set
-            .insert_framed_area(start.floor().into(), end.ceil().into(), port);
+            .insert_framed_area(start, end, port);
         debug!("mmap success");
         0
     }
