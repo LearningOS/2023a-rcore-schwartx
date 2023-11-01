@@ -4,8 +4,9 @@ use core::{mem::size_of, ptr::copy_nonoverlapping};
 use crate::{
     config::MAX_SYSCALL_NUM,
     mm::translated_byte_buffer,
+    syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_TASK_INFO, SYSCALL_YIELD},
     task::{
-        change_program_brk, current_user_token, exit_current_and_run_next,
+        change_program_brk, current_user_token, exit_current_and_run_next, incr_syscalls,
         suspend_current_and_run_next, TaskStatus,
     },
     timer::get_time_us,
@@ -32,6 +33,7 @@ pub struct TaskInfo {
 /// task exits and submit an exit code
 pub fn sys_exit(_exit_code: i32) -> ! {
     trace!("kernel: sys_exit");
+    incr_syscalls(SYSCALL_EXIT);
     exit_current_and_run_next();
     panic!("Unreachable in sys_exit!");
 }
@@ -39,6 +41,7 @@ pub fn sys_exit(_exit_code: i32) -> ! {
 /// current task gives up resources for other tasks
 pub fn sys_yield() -> isize {
     trace!("kernel: sys_yield");
+    incr_syscalls(SYSCALL_YIELD);
     suspend_current_and_run_next();
     0
 }
@@ -49,6 +52,7 @@ pub fn sys_yield() -> isize {
 
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
+    incr_syscalls(SYSCALL_GET_TIME);
 
     if _ts.is_null() {
         return -1;
@@ -89,6 +93,7 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
 pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
+    incr_syscalls(SYSCALL_TASK_INFO);
     -1
 }
 
