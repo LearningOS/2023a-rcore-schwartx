@@ -1,14 +1,18 @@
 //! Process management syscalls
+use core::{mem::size_of, ptr::copy_nonoverlapping};
+
 use alloc::sync::Arc;
 
 use crate::{
-    config::MAX_SYSCALL_NUM,
+    config::{MAX_SYSCALL_NUM, PAGE_SIZE},
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{translated_byte_buffer, translated_refmut, translated_str, MapPermission, VirtAddr},
+    syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_TASK_INFO, SYSCALL_YIELD},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next, TaskStatus,
     },
+    timer::{get_time_ms, get_time_us},
 };
 
 #[repr(C)]
@@ -29,9 +33,33 @@ pub struct TaskInfo {
     time: usize,
 }
 
+/// Copies the content of a provided reference to a potentially page-split memory location.
+pub fn copy_to_user<T: Sized>(user_ptr: *mut T, data: &T, token: usize) -> Result<(), isize> {
+    // Safety: Function is inherently unsafe as it manipulates raw pointers and relies on correct token.
+    unsafe {
+        let buffers = translated_byte_buffer(token, user_ptr as *const u8, size_of::<T>());
+        if buffers.is_empty() {
+            return Err(-1);
+        }
+
+        let mut offset = 0;
+        for buffer in buffers {
+            copy_nonoverlapping(
+                (data as *const T as *const u8).add(offset),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            );
+            offset += buffer.len();
+        }
+    }
+
+    Ok(())
+}
+
 /// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
     trace!("kernel:pid[{}] sys_exit", current_task().unwrap().pid.0);
+    current_task().unwrap().incr_syscalls(SYSCALL_EXIT);
     exit_current_and_run_next(exit_code);
     panic!("Unreachable in sys_exit!");
 }
@@ -39,6 +67,7 @@ pub fn sys_exit(exit_code: i32) -> ! {
 /// current task gives up resources for other tasks
 pub fn sys_yield() -> isize {
     trace!("kernel:pid[{}] sys_yield", current_task().unwrap().pid.0);
+    current_task().unwrap().incr_syscalls(SYSCALL_YIELD);
     suspend_current_and_run_next();
     0
 }
@@ -79,7 +108,11 @@ pub fn sys_exec(path: *const u8) -> isize {
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    trace!("kernel::pid[{}] sys_waitpid [{}]", current_task().unwrap().pid.0, pid);
+    trace!(
+        "kernel::pid[{}] sys_waitpid [{}]",
+        current_task().unwrap().pid.0,
+        pid
+    );
     let task = current_task().unwrap();
     // find a child process
 
@@ -117,41 +150,109 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    current_task().unwrap().incr_syscalls(SYSCALL_GET_TIME);
+
+    if ts.is_null() {
+        return -1;
+    }
+
+    let us = get_time_us();
+    let time_val_part = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+
+    match copy_to_user(ts, &time_val_part, current_user_token()) {
+        Ok(_) => 0,
+        Err(err) => err,
+    }
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!(
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let task = current_task().unwrap();
+    task.incr_syscalls(SYSCALL_TASK_INFO);
+    let (syscall_times, status, start_time) = task.get_task_info();
+    let task_info_val = TaskInfo {
+        status,
+        syscall_times,
+        time: get_time_ms() - start_time,
+    };
+
+    match copy_to_user(ti, &task_info_val, current_user_token()) {
+        Ok(_) => 0,
+        Err(err) => err,
+    }
 }
 
 /// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+
+    if len == 0 {
+        return -1;
+    }
+
+    // 检查 port 是否有效
+    if port & !0x7 != 0 || port & 0x7 == 0 {
+        debug!("port is invalid");
+        return -1;
+    }
+
+    // somethin wrong with `from_bits_truncate`
+    let port = match port {
+        1 => MapPermission::R,
+        2 => MapPermission::W,
+        3 => MapPermission::R | MapPermission::W,
+        _ => MapPermission::empty(),
+    } | MapPermission::U;
+
+    // 计算结束地址，向上取整至页面边界
+    let end = VirtAddr::from((start + len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1));
+    let start = VirtAddr::from(start);
+
+    if !start.aligned() {
+        debug!("start is not align");
+        return -1;
+    }
+
+    if !end.aligned() {
+        debug!("end is not align");
+        return -1;
+    }
+
+    current_task().unwrap().mmap(start, end, port)
 }
 
 /// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+
+    if len == 0 || start % PAGE_SIZE != 0 || len % PAGE_SIZE != 0 {
+        // 如果长度为 0，或者 start 或 len 没有按页对齐，返回错误
+        return -1;
+    }
+
+    let end = start + len;
+
+    current_task().unwrap().munmap(start.into(), end.into())
 }
 
 /// change data segment size

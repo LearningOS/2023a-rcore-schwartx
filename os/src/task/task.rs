@@ -1,8 +1,8 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::config::{MAX_SYSCALL_NUM, TRAP_CONTEXT_BASE};
+use crate::mm::{MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
@@ -68,6 +68,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// syscall times
+    pub syscall_times: [u32; MAX_SYSCALL_NUM],
+
+    /// start time
+    pub start_time: usize,
 }
 
 impl TaskControlBlockInner {
@@ -118,6 +124,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    start_time: 0,
                 })
             },
         };
@@ -191,6 +199,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    syscall_times: [0; MAX_SYSCALL_NUM],
+                    start_time: 0,
                 })
             },
         });
@@ -209,6 +219,46 @@ impl TaskControlBlock {
     /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    /// get task info
+    pub fn get_task_info(&self) -> ([u32; MAX_SYSCALL_NUM], TaskStatus, usize) {
+        let inner = self.inner_exclusive_access();
+        let syscall_times = inner.syscall_times;
+        let task_status = inner.get_status();
+        let start_time = inner.start_time;
+        (syscall_times, task_status, start_time)
+    }
+
+    /// mmap
+    pub fn mmap(&self, start: VirtAddr, end: VirtAddr, port: MapPermission) -> isize {
+        let mut inner = self.inner_exclusive_access();
+        if !inner.memory_set.can_allocate_range(start, end) {
+            debug!("mmap: vaddr is mapped");
+            return -1;
+        }
+        inner.memory_set.insert_framed_area(start, end, port);
+        debug!("mmap success");
+        0
+    }
+
+    /// munmap
+    pub fn munmap(&self, start: VirtAddr, end: VirtAddr) -> isize {
+        let mut inner = self.inner_exclusive_access();
+
+        if inner.memory_set.can_allocate_range(start, end) {
+            debug!("munmap: vaddr is not mapped");
+            return -1;
+        }
+        inner.memory_set.unmap_area(start, end);
+        debug!("munmap success");
+        0
+    }
+
+    /// syscalls count
+    pub fn incr_syscalls(&self, system_id: usize) {
+        let mut inner = self.inner_exclusive_access();
+        inner.syscall_times[system_id] += 1;
     }
 
     /// change the location of the program break. return None if failed.

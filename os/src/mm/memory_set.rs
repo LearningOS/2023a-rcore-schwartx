@@ -60,6 +60,44 @@ impl MemorySet {
             None,
         );
     }
+    /// Check if the range from start to end can be allocated with the specified permissions
+    pub fn can_allocate_range(&self, start: VirtAddr, end: VirtAddr) -> bool {
+        // Align the start address down and the end address up to page boundaries
+        let start_vpn = start.floor();
+        let end_vpn = end.ceil();
+
+        // // Iterate over each page in the range
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            // If the page is already mapped in the page table, return false
+            if let Some(pte) = self.page_table.translate(vpn) {
+                if pte.is_valid() {
+                    return false;
+                }
+            }
+        }
+
+        // If all pages in the range are not mapped, return true
+        true
+    }
+    /// unmap_area
+    pub fn unmap_area(&mut self, start: VirtAddr, end: VirtAddr) {
+        let start_vpn = start.floor();
+        let end_vpn = end.ceil();
+
+        // Remove the corresponding areas from the Vec<MapArea>
+        self.areas.retain(|area| {
+            let area_start_vpn = area.vpn_range.get_start();
+            let area_end_vpn = area.vpn_range.get_end();
+
+            // Check if the area is completely outside the range to unmap
+            area_end_vpn <= start_vpn || area_start_vpn >= end_vpn
+        });
+
+        // Iterate over each page in the range
+        for vpn in start_vpn.0..end_vpn.0 {
+            self.page_table.unmap(VirtPageNum(vpn));
+        }
+    }
     /// remove a area
     pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
         if let Some((idx, area)) = self

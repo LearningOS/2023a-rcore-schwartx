@@ -1,6 +1,7 @@
 //! File and filesystem-related syscalls
 use crate::mm::translated_byte_buffer;
 use crate::sbi::console_getchar;
+use crate::syscall::SYSCALL_WRITE;
 use crate::task::{current_task, current_user_token, suspend_current_and_run_next};
 
 const FD_STDIN: usize = 0;
@@ -11,6 +12,7 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     trace!("kernel:pid[{}] sys_write", current_task().unwrap().pid.0);
     match fd {
         FD_STDOUT => {
+            current_task().unwrap().incr_syscalls(SYSCALL_WRITE);
             let buffers = translated_byte_buffer(current_user_token(), buf, len);
             for buffer in buffers {
                 print!("{}", core::str::from_utf8(buffer).unwrap());
