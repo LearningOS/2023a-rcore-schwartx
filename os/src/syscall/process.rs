@@ -3,7 +3,7 @@ use core::{mem::size_of, ptr::copy_nonoverlapping};
 
 use crate::{
     config::{MAX_SYSCALL_NUM, PAGE_SIZE},
-    mm::{translated_byte_buffer, MapPermission},
+    mm::{translated_byte_buffer, MapPermission, VirtAddr},
     syscall::{SYSCALL_EXIT, SYSCALL_GET_TIME, SYSCALL_TASK_INFO, SYSCALL_YIELD},
     task::{
         change_program_brk, current_user_token, exit_current_and_run_next, get_start_time,
@@ -113,10 +113,7 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     trace!("kernel: sys_mmap");
-
-    // 检查 start 是否按页对齐
-    if start % PAGE_SIZE != 0 {
-        debug!("start is not align");
+    if len == 0 {
         return -1;
     }
 
@@ -128,13 +125,20 @@ pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
     let port = MapPermission::from_bits_truncate(port as u8);
 
     // 计算结束地址，向上取整至页面边界
-    let end = if len > 0 {
-        (start + len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)
-    } else {
-        start
-    };
+    let end = VirtAddr::from((start + len + PAGE_SIZE - 1) & !(PAGE_SIZE - 1));
+    let start = VirtAddr::from(start);
 
-    mmap(start.into(), end.into(), port)
+    if !start.aligned() {
+        debug!("start is not align");
+        return -1;
+    }
+
+    if !end.aligned() {
+        debug!("end is not align");
+        return -1;
+    }
+
+    mmap(start, end, port)
 }
 
 // YOUR JOB: Implement munmap.
