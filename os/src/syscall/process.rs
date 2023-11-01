@@ -1,9 +1,14 @@
 //! Process management syscalls
+use core::{mem::size_of, ptr::copy_nonoverlapping};
+
 use crate::{
     config::MAX_SYSCALL_NUM,
+    mm::translated_byte_buffer,
     task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,
+        change_program_brk, current_user_token, exit_current_and_run_next,
+        suspend_current_and_run_next, TaskStatus,
     },
+    timer::get_time_us,
 };
 
 #[repr(C)]
@@ -41,9 +46,42 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
+
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+
+    if _ts.is_null() {
+        return -1;
+    }
+
+    let ts_size = size_of::<TimeVal>();
+
+    // 使用 translated_byte_buffer 函数处理跨页问题
+    let time_val_buffers = translated_byte_buffer(current_user_token(), _ts as *const u8, ts_size);
+    if time_val_buffers.is_empty() {
+        return -1;
+    }
+
+    // 获取当前时间
+    let us = get_time_us();
+    let sec = us / 1_000_000;
+    let usec = us % 1_000_000;
+
+    // 逐部分复制数据
+    let mut offset = 0;
+    for buffer in time_val_buffers {
+        let time_val_part = TimeVal { sec, usec };
+        unsafe {
+            copy_nonoverlapping(
+                (&time_val_part as *const TimeVal as *const u8).add(offset),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            );
+        }
+        offset += buffer.len();
+    }
+
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
