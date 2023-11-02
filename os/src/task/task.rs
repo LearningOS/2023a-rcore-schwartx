@@ -216,6 +216,12 @@ impl TaskControlBlock {
         // ---- release parent PCB
     }
 
+    /// add child
+    pub fn add_child(&self, child: Arc<TaskControlBlock>) {
+        let mut parent_inner = self.inner_exclusive_access();
+        parent_inner.children.push(child)
+    }
+
     /// get pid of process
     pub fn getpid(&self) -> usize {
         self.pid.0

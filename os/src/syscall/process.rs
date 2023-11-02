@@ -277,7 +277,9 @@ pub fn sys_spawn(path: *const u8) -> isize {
         Some(elf_data) => {
             let new_task = TaskControlBlock::new(elf_data);
             let new_task_pid = new_task.pid.0 as isize;
-            add_task(Arc::new(new_task));
+            let new_task = Arc::new(new_task);
+            current_task().unwrap().add_child(new_task.clone());
+            add_task(new_task);
             new_task_pid
         }
         None => -1,
