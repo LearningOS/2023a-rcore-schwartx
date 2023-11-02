@@ -241,6 +241,24 @@ impl TaskControlBlock {
         self.pid.0
     }
 
+    /// get_task_status
+    pub fn get_task_status(&self) -> TaskStatus {
+        let parent_inner = self.inner_exclusive_access();
+        parent_inner.task_status
+    }
+
+    /// get_stride
+    pub fn get_stride(&self) -> usize {
+        let parent_inner = self.inner_exclusive_access();
+        parent_inner.stride
+    }
+
+    /// update stride
+    pub fn update_stride(&self) {
+        let mut parent_inner = self.inner_exclusive_access();
+        parent_inner.stride += parent_inner.pass;
+    }
+
     /// set_priority
     pub fn set_priority(&self, prio: usize) {
         let mut parent_inner = self.inner_exclusive_access();
