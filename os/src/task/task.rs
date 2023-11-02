@@ -241,6 +241,13 @@ impl TaskControlBlock {
         self.pid.0
     }
 
+    /// set_priority
+    pub fn set_priority(&self, prio: usize) {
+        let mut parent_inner = self.inner_exclusive_access();
+        parent_inner.priority = prio;
+        parent_inner.pass = BIG_STRIDE / prio;
+    }
+
     /// get task info
     pub fn get_task_info(&self) -> ([u32; MAX_SYSCALL_NUM], TaskStatus, usize) {
         let inner = self.inner_exclusive_access();
